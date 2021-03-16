@@ -1,0 +1,229 @@
+---
+# Configure AWS Environment
+- name: Automating AWS with TerraForm
+  hosts: localhost
+  tasks:
+
+# Execute terraform installation part1
+    - name: Run TF installation part1
+      shell: 'curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -;'
+
+# Execute terraform installation part2
+    - name: Run TF installation part2
+      shell: 'sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main";'
+
+# Execute terraform installation part3
+    - name: Run TF installation part3
+      shell: 'sudo apt-get update && sudo apt-get install terraform;'
+  
+# Clone TerraForm files to Localhost
+    - name: Clone w4-tf-test repo to Localhost 
+      ansible.builtin.git:
+        accept_hostkey: no
+        clone: yes
+        repo: https://github.com/403278/w4-tf-test.git
+        dest: ~/w4-tf-test/
+  
+# Execute terraform init to initialize directory
+    - name: Run TF init command
+      shell: 'cd ~/w4-tf-test/; terraform init;'
+
+# Execute terraform validate directory
+    - name: Run TF validate command
+      shell: 'cd ~/w4-tf-test/; terraform validate;'
+
+# Execute Unzip installation
+    - name: Unzip module installation
+      apt:
+        name: unzip
+        state: latest
+
+# Execute AWS CLI installation
+# CAUTION only run once to install!
+    - name: Run AWS CLI installation
+      shell: 'curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"; unzip awscliv2.zip; sudo ./aws/install --update;'
+
+# Execute AWS configure credentials
+    - name: Run aws configure credentials
+      expect:
+        command: aws configure
+        responses:
+          AWS Access Key ID: "AKIAVC63B6TA3IPQ2UUH"
+          AWS Secret Access Key: "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"
+          Default region name: "eu-central-1"
+          Default output format: ""
+      no_log: true
+  
+# Execute terraform tf files to create "Webhost" instance
+    - name: Run TF to create a EC2 instance
+      shell: 'cd ~/w4-tf-test/; terraform apply -auto-approve;'
+    - pause:
+        minutes: 3
+    
+# Get Public IP Address
+    - name: Get Public IP
+      shell: 'cd ~/w4-tf-test/; terraform output publicIp;'
+      register: ansiblePublicIp
+
+# Create (temp) InvTemp.ini file, to store the newly received IP address
+    - name: Create InvTemp.ini file
+      vars:
+        ansibleUserName: ubuntu
+        ansiblePrivateKey: ~/AnsibleCN.pem
+      template:
+        src: ~/InvTempTemplate.j2
+        dest: ~/InvTemp.ini
+
+# Chmod Command publickey
+    - name: Run chmod command
+      shell: 'cd ~/; chmod 400 AnsibleCN.pem;' 
+        
+# Configure Web Server
+- name: Automating Flask Application Hosting
+  hosts: ec2
+  become: yes
+  become_user: root
+  vars_files:
+    - vars/default.yml
+    
+  tasks:
+    - name: System update
+      apt:
+        update_cache: yes
+        
+    - name: System upgrade
+      apt:
+        name: "*"
+        state: latest
+        
+    - name: Apache2 service installation
+      apt:
+        name: apache2
+        update_cache: yes
+        state: latest
+        
+    - name: Mod_wsgi module installation
+      apt:
+        name: libapache2-mod-wsgi-py3
+        state: latest
+          
+    - name: Enabled mod_rewrite
+      apache2_module: 
+        name: rewrite 
+        state: present
+      notify:
+        - restart apache2
+
+# Set Apache2 port to listen
+    - name: apache2 listen on port {{ port_5000 }}
+      lineinfile: dest=/etc/apache2/ports.conf regexp="^Listen " line="Listen {{ port_5000 }}" state=present
+      notify:
+        - restart apache2
+
+# Set Apache2 virtualhost on port
+    - name: apache2 virtualhost on port {{ port_5000 }}
+      lineinfile: dest=/etc/apache2/sites-available/000-default.conf regexp="^<VirtualHost \*:" line="<VirtualHost *:{{ port_5000 }}>"
+      notify:
+        - restart apache2
+
+    - name: Pip installation
+      apt:
+        name: python3-pip
+        state: latest
+        
+    - name: Git installation
+      apt:
+        name: git
+        state: latest
+
+    - name: Virtualenv installation part1
+      apt:
+        name: virtualenv
+        state: latest
+
+    - name: Virtualenv installation part2
+      apt:
+        name: python3-venv
+        state: latest 
+
+# Template conf file to Webhost
+    - name: Template conf file to Webhost
+      ansible.builtin.template:
+        src: ~/files/apache.conf.j2
+        dest: /etc/apache2/sites-available/{{ http_url }}.conf
+        owner: "{{ app_user }}"
+        mode: '0644'
+
+# Sudo enable conf file
+# CAUTION! only run once to enable!
+    - name: Enable domain with a2ensite
+      command: a2ensite {{ http_url }}
+      args:
+        creates: /etc/apache2/sites-enabled/{{ http_url }}.conf
+      notify:
+        - restart apache2
+
+# Create document root
+    - name: Create document root
+      file:
+        path: "/var/www/{{ http_url }}"
+        state: directory
+        owner: "{{ app_user }}"
+        mode: '0755'
+    
+# Clone Flask todoApp to Webhost
+    - name: Clone todoApp repo to Webhost 
+      ansible.builtin.git:
+        accept_hostkey: no
+        clone: yes
+        repo: https://github.com/403278/todoApp.git
+        dest: /var/www/{{ http_url }}
+
+# Template wsgi file to Webhost
+    - name: Template wsgi file to Webhost
+      ansible.builtin.template:
+        src: ~/files/apache.wsgi.j2
+        dest: /var/www/{{ http_url }}/{{ http_host }}.wsgi
+        owner: "{{ app_user }}"
+        mode: '0644'
+
+# Create Virtualenv
+    - name: Create Virtualenv 
+      shell: 'cd /var/www/{{ http_url }}/; python3 -m venv {{ venv }};'
+
+# Activate Virtualenv
+    - name: Activate Virtualenv 
+      shell: 'cd /var/www/{{ http_url }}/; . {{ venv }}/bin/activate;'
+
+# Install requirements to tdApp
+    - name: Install python modules from requirements.txt
+      pip:
+        requirements: /var/www/{{ http_url }}/requirements.txt
+        virtualenv: /var/www/{{ http_url }}/{{ venv }}      
+
+# Setup Virtualenv with FLASK_APP
+    - name: Export FLASK_APP 
+      shell: 'cd /var/www/{{ http_url }}/; export FLASK_APP={{ http_host }}.py;' 
+
+# Setup Virtualenv with FLASK_ENV
+    - name: Export Development 
+      shell: 'cd /var/www/{{ http_url }}/; export FLASK_ENV=development;' 
+
+# Run Virtualenv server
+    - name: Run Virtualenv todoApp 
+      shell: 'flask run -h 0.0.0.0;'
+      notify:
+        - restart apache2      
+
+  handlers:
+    - name: reload apache2
+      ansible.builtin.service:
+        name: apache2
+        state: reloaded
+
+    - name: restart apache2
+      ansible.builtin.service:
+        name: apache2
+        state: restarted
+        
+ 

@@ -1,0 +1,2 @@
+[ec2]
+{{ ansiblePublicIp.stdout[1:-1] }} ansible_user={{ ansibleUserName }} ansible_ssh_private_key_file={{ ansiblePrivateKey }}

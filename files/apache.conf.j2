@@ -1,0 +1,20 @@
+<VirtualHost *:{{ port_5000 }}>
+        ServerName {{ http_url }}
+        ServerAdmin webmaster@{{ http_url }}
+        DocumentRoot /var/www/{{ http_url }}
+        ServerAlias www.{{ http_url }}
+
+        WSGIDaemonProcess {{ http_url }} user=www-data group=www-data threads=5
+
+        WSGIScriptAlias / /var/www/{{ http_url }}/{{ http_host }}.wsgi
+
+        <Directory /var/www/{{ http_url }}>
+             WSGIApplicationGroup %{GLOBAL}
+             Order allow,deny
+             Require all granted
+        </Directory>
+
+        ErrorLog ${APACHE_LOG_DIR}/error.log
+        CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+</VirtualHost>

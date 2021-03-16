@@ -1,0 +1,4 @@
+#!/usr/bin/python3
+import sys
+    sys.path.insert(0, '/var/www/{{ http_url }}')
+    from {{ http_host }} import app as application
